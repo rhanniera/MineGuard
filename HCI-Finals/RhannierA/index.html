@@ -20,7 +20,10 @@
                 <li><a href="#" onclick="showSection('dashboard')" class="nav-link">Dashboard</a></li>
                 <li><a href="#" onclick="showSection('faq')" class="nav-link">FAQ</a></li>
                 <li><a href="#" onclick="showSection('guidelines')" class="nav-link">Guidelines</a></li>
-                <li><a href="#" onclick="showSection('profile')" class="nav-link" id="profileLink">Profile</a></li>
+                <li><a href="#" onclick="showLoginForm()" class="nav-link" id="loginBtn">Login</a></li>
+                <li><a href="#" onclick="showSignupForm()" class="nav-link" id="signupBtn">Sign Up</a></li>
+                <li><a href="#" onclick="showSection('profile')" class="nav-link" id="profileLink" style="display:none;">Profile</a></li>
+                <li><a href="#" onclick="showSection('admin')" class="nav-link" id="adminLink" style="display:none;">Admin Dashboard</a></li>
                 <li><a href="#" onclick="logout()" class="nav-link" id="logoutBtn" style="display:none;">Logout</a></li>
             </ul>
             <div class="hamburger" id="hamburger">
@@ -117,7 +120,7 @@
                         <label for="emailVerification">Send verification email</label>
                     </div>
                     <button type="submit" class="btn btn-primary full-width">Sign Up</button>
-                    <p class="auth-toggle">Already have an account? <a href="#" onclick="toggleAuthForm()">Login here</a></p>
+                    <p class="auth-toggle">Already have an account? <a href="#" onclick="showLoginForm()">Login here</a></p>
                 </form>
 
                 <!-- Login Form -->
@@ -135,7 +138,7 @@
                         <label for="rememberMe">Remember me</label>
                     </div>
                     <button type="submit" class="btn btn-primary full-width">Login</button>
-                    <p class="auth-toggle">Don't have an account? <a href="#" onclick="toggleAuthForm()">Sign up here</a></p>
+                    <p class="auth-toggle">Don't have an account? <a href="#" onclick="showSignupForm()">Sign up here</a></p>
                 </form>
             </div>
         </div>
@@ -586,8 +589,8 @@
     <section id="admin" class="section">
         <div class="container">
             <div class="section-header">
-                <h1>Admin Panel</h1>
-                <p>Review and manage all hazard reports</p>
+                <h1>Admin Panel - Database Management</h1>
+                <p>Review, manage, and export all hazard reports in the system</p>
             </div>
 
             <div class="admin-controls">
@@ -609,6 +612,14 @@
                         <option value="High">High</option>
                         <option value="Critical">Critical</option>
                     </select>
+                </div>
+                <div class="export-controls">
+                    <button class="btn btn-primary" onclick="exportReportsAsJSON()">
+                        <i class="fas fa-download"></i> Export as JSON
+                    </button>
+                    <button class="btn btn-secondary" onclick="exportReportsAsCSV()">
+                        <i class="fas fa-download"></i> Export as CSV
+                    </button>
                 </div>
             </div>
 

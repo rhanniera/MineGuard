@@ -20,11 +20,17 @@ function setCurrentUser(user) {
     localStorage.setItem('currentUser', JSON.stringify(user));
 }
 
+function isAdmin() {
+    const user = getCurrentUser();
+    return user && user.isAdmin === true;
+}
+
 // ============================
 // PAGE INITIALIZATION
 // ============================
 
 document.addEventListener('DOMContentLoaded', function () {
+    initializeAdminAccount();
     initializeApp();
     setupEventListeners();
     
@@ -35,6 +41,30 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
+function initializeAdminAccount() {
+    // Check if admin account exists
+    const users = getStorageData('users');
+    const adminExists = users.some(u => u.email === 'admin@admin.com');
+    
+    if (!adminExists) {
+        const adminUser = {
+            id: Date.now(),
+            fullName: 'System Administrator',
+            company: 'MineGuard Admin',
+            jobRole: 'Administrator',
+            email: 'admin@admin.com',
+            password: btoa('Totheremix123!'), // Base64 encoding for consistency
+            memberSince: new Date().toLocaleDateString(),
+            notifications: 'all',
+            isAdmin: true
+        };
+        
+        users.push(adminUser);
+        saveStorageData('users', users);
+        console.log('Admin account created: admin@admin.com');
+    }
+}
+
 function initializeApp() {
     const user = getCurrentUser();
     
@@ -42,13 +72,26 @@ function initializeApp() {
         // User is logged in
         document.getElementById('logoutBtn').style.display = 'block';
         document.getElementById('profileLink').style.display = 'block';
+        document.getElementById('loginBtn').style.display = 'none';
+        document.getElementById('signupBtn').style.display = 'none';
         document.getElementById('authTitle').textContent = 'Welcome, ' + user.fullName;
+        
+        // Show admin link only if user is admin
+        if (isAdmin()) {
+            document.getElementById('adminLink').style.display = 'block';
+        } else {
+            document.getElementById('adminLink').style.display = 'none';
+        }
+        
         loadUserProfile();
         loadUserReports();
     } else {
         // User is logged out
         document.getElementById('logoutBtn').style.display = 'none';
         document.getElementById('profileLink').style.display = 'none';
+        document.getElementById('adminLink').style.display = 'none';
+        document.getElementById('loginBtn').style.display = 'block';
+        document.getElementById('signupBtn').style.display = 'block';
         showSection('home');
     }
 }
@@ -91,11 +134,19 @@ function setupEventListeners() {
 function showSection(sectionId) {
     // Check if user is logged in for protected sections
     const user = getCurrentUser();
-    const protectedSections = ['report', 'dashboard', 'profile', 'admin'];
+    const protectedSections = ['report', 'dashboard', 'profile'];
+    const adminSections = ['admin'];
     
     if (protectedSections.includes(sectionId) && !user) {
         showToast('Please log in first', 'info');
         showSection('auth');
+        return;
+    }
+    
+    // Check if user is admin for admin sections
+    if (adminSections.includes(sectionId) && !isAdmin()) {
+        showToast('Admin access required. Only administrators can access this section.', 'error');
+        showSection('home');
         return;
     }
     
@@ -154,6 +205,34 @@ function toggleAuthForm() {
     authTitle.textContent = signupForm.classList.contains('active-form') 
         ? 'Create Your Account' 
         : 'Login to Your Account';
+}
+
+function showLoginForm() {
+    const signupForm = document.getElementById('signupForm');
+    const loginForm = document.getElementById('loginForm');
+    const authTitle = document.getElementById('authTitle');
+    
+    // Show login form
+    signupForm.classList.remove('active-form');
+    loginForm.classList.add('active-form');
+    authTitle.textContent = 'Login to Your Account';
+    
+    // Navigate to auth section
+    showSection('auth');
+}
+
+function showSignupForm() {
+    const signupForm = document.getElementById('signupForm');
+    const loginForm = document.getElementById('loginForm');
+    const authTitle = document.getElementById('authTitle');
+    
+    // Show signup form
+    signupForm.classList.add('active-form');
+    loginForm.classList.remove('active-form');
+    authTitle.textContent = 'Create Your Account';
+    
+    // Navigate to auth section
+    showSection('auth');
 }
 
 function validatePassword(password) {
@@ -239,17 +318,29 @@ function handleLogin(e) {
     }
     
     setCurrentUser(user);
-    showToast('Login successful!', 'success');
+    
+    if (user.isAdmin) {
+        showToast('Welcome Admin! You now have access to the admin dashboard.', 'success');
+    } else {
+        showToast('Login successful!', 'success');
+    }
     
     document.getElementById('loginForm').reset();
     setTimeout(() => {
         initializeApp();
-        showSection('home');
+        if (user.isAdmin) {
+            showSection('admin');
+        } else {
+            showSection('home');
+        }
     }, 1000);
 }
 
 function logout() {
     localStorage.removeItem('currentUser');
+    document.getElementById('adminLink').style.display = 'none';
+    document.getElementById('loginBtn').style.display = 'block';
+    document.getElementById('signupBtn').style.display = 'block';
     showToast('Logged out successfully', 'success');
     setTimeout(() => {
         initializeApp();
@@ -740,13 +831,25 @@ function deleteAccount() {
 // ============================
 
 function loadAdminPanel() {
+    const user = getCurrentUser();
+    if (!isAdmin()) {
+        showToast('Admin access required', 'error');
+        showSection('home');
+        return;
+    }
+    
     const allReports = getStorageData('reports');
+    const allUsers = getStorageData('users');
     
     // Calculate stats
     const stats = {
         total: allReports.length,
         critical: allReports.filter(r => r.severity === 'Critical').length,
+        high: allReports.filter(r => r.severity === 'High').length,
         pending: allReports.filter(r => r.status === 'Pending').length,
+        inReview: allReports.filter(r => r.status === 'In Review').length,
+        resolved: allReports.filter(r => r.status === 'Resolved').length,
+        totalUsers: allUsers.filter(u => !u.isAdmin).length,
         avgTime: calculateAvgResolutionTime(allReports)
     };
     
@@ -754,6 +857,35 @@ function loadAdminPanel() {
     document.getElementById('adminCriticalReports').textContent = stats.critical;
     document.getElementById('adminPendingReports').textContent = stats.pending;
     document.getElementById('adminAvgTime').textContent = stats.avgTime;
+    
+    // Add additional stats display
+    const statsContainer = document.querySelector('.admin-stats');
+    if (statsContainer && !document.getElementById('adminHighReports')) {
+        const additionalStats = `
+            <div class="stat-card">
+                <h4>High Severity</h4>
+                <p id="adminHighReports">${stats.high}</p>
+            </div>
+            <div class="stat-card">
+                <h4>In Review</h4>
+                <p id="adminInReviewReports">${stats.inReview}</p>
+            </div>
+            <div class="stat-card">
+                <h4>Resolved</h4>
+                <p id="adminResolvedReports">${stats.resolved}</p>
+            </div>
+            <div class="stat-card">
+                <h4>Total Users</h4>
+                <p id="adminTotalUsers">${stats.totalUsers}</p>
+            </div>
+        `;
+        statsContainer.insertAdjacentHTML('beforeend', additionalStats);
+    } else {
+        document.getElementById('adminHighReports').textContent = stats.high;
+        document.getElementById('adminInReviewReports').textContent = stats.inReview;
+        document.getElementById('adminResolvedReports').textContent = stats.resolved;
+        document.getElementById('adminTotalUsers').textContent = stats.totalUsers;
+    }
     
     displayAdminReports(allReports);
 }
@@ -763,7 +895,7 @@ function displayAdminReports(reports) {
     container.innerHTML = '';
     
     if (reports.length === 0) {
-        container.innerHTML = '<p style="text-align: center; padding: 2rem; color: var(--text-light);">No reports yet</p>';
+        container.innerHTML = '<p style="text-align: center; padding: 2rem; color: var(--text-light);">No hazard reports in the system yet</p>';
         return;
     }
     
@@ -789,13 +921,14 @@ function displayAdminReports(reports) {
                 <strong>Location:</strong> ${report.location} | <strong>Submitted:</strong> ${submittedDate}
             </p>
             <div class="admin-report-actions">
-                <button class="btn btn-primary" onclick="openAdminReportDetail(${report.id})">Full Details</button>
+                <button class="btn btn-primary" onclick="openAdminReportDetail(${report.id})">View Details</button>
                 <select class="status-update" onchange="updateReportStatus(${report.id}, this.value)">
                     <option value="">Change Status</option>
                     <option value="Pending">Pending</option>
                     <option value="In Review">In Review</option>
                     <option value="Resolved">Resolved</option>
                 </select>
+                <button class="btn btn-danger" onclick="adminDeleteReport(${report.id})">Delete</button>
             </div>
         `;
         
@@ -818,6 +951,11 @@ function openAdminReportDetail(reportId) {
 function updateReportStatus(reportId, newStatus) {
     if (!newStatus) return;
     
+    if (!isAdmin()) {
+        showToast('Only admins can update report status', 'error');
+        return;
+    }
+    
     const reports = getStorageData('reports');
     const reportIndex = reports.findIndex(r => r.id === reportId);
     
@@ -827,13 +965,34 @@ function updateReportStatus(reportId, newStatus) {
     }
     
     reports[reportIndex].status = newStatus;
+    reports[reportIndex].lastUpdated = new Date().toISOString();
     saveStorageData('reports', reports);
     
-    showToast('Report status updated successfully', 'success');
+    showToast(`Report status updated to: ${newStatus}`, 'success');
     loadAdminPanel();
 }
 
+function adminDeleteReport(reportId) {
+    if (!isAdmin()) {
+        showToast('Only admins can delete reports', 'error');
+        return;
+    }
+    
+    if (confirm('Are you sure you want to permanently delete this report? This action cannot be undone.')) {
+        const reports = getStorageData('reports');
+        const filteredReports = reports.filter(r => r.id !== reportId);
+        saveStorageData('reports', filteredReports);
+        showToast('Report deleted successfully', 'success');
+        loadAdminPanel();
+    }
+}
+
 function filterAdminReports() {
+    if (!isAdmin()) {
+        showToast('Admin access required', 'error');
+        return;
+    }
+    
     const searchTerm = document.getElementById('adminSearchReports').value.toLowerCase();
     const statusFilter = document.getElementById('adminFilterStatus').value;
     const severityFilter = document.getElementById('adminFilterSeverity').value;
@@ -858,6 +1017,64 @@ function filterAdminReports() {
     }
     
     displayAdminReports(reports);
+}
+
+function exportReportsAsJSON() {
+    if (!isAdmin()) {
+        showToast('Admin access required', 'error');
+        return;
+    }
+    
+    const reports = getStorageData('reports');
+    const dataStr = JSON.stringify(reports, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `hazard-reports-${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    showToast('Reports exported successfully', 'success');
+}
+
+function exportReportsAsCSV() {
+    if (!isAdmin()) {
+        showToast('Admin access required', 'error');
+        return;
+    }
+    
+    const reports = getStorageData('reports');
+    
+    if (reports.length === 0) {
+        showToast('No reports to export', 'warning');
+        return;
+    }
+    
+    // Create CSV header
+    const headers = ['ID', 'Title', 'Description', 'Location', 'Severity', 'Status', 'Submitted By', 'Company', 'Date Observed', 'Time Observed', 'Submitted Date'];
+    const csvContent = [
+        headers.join(','),
+        ...reports.map(r => [
+            r.id,
+            `"${r.hazardTitle}"`,
+            `"${r.description.substring(0, 100)}"`,
+            `"${r.location}"`,
+            r.severity,
+            r.status,
+            r.submittedBy,
+            r.company,
+            r.dateObserved,
+            r.timeObserved,
+            new Date(r.submittedDate).toLocaleString()
+        ].join(','))
+    ].join('\n');
+    
+    const dataBlob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `hazard-reports-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    showToast('Reports exported as CSV successfully', 'success');
 }
 
 function calculateAvgResolutionTime(reports) {
