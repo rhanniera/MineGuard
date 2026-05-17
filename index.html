@@ -632,9 +632,17 @@
                     <p class="settings-description">Configure a shared database URL to enable real-time hazard report syncing across multiple devices and locations.</p>
                     
                     <div class="settings-section">
-                        <label for="cloudDbUrl">Firebase Realtime Database URL</label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="demoModeToggle" onchange="toggleDemoMode()">
+                            <span>🌐 Enable Demo Shared Mode (for testing across devices)</span>
+                        </label>
+                        <small>Demo mode allows all testers to see each other's reports instantly without setup</small>
+                    </div>
+
+                    <div class="settings-section">
+                        <label for="cloudDbUrl">Firebase Realtime Database URL (Optional)</label>
                         <input type="text" id="cloudDbUrl" placeholder="https://your-project-default-rtdb.firebaseio.com" class="settings-input">
-                        <small>Leave blank to disable cloud sync and use local storage only</small>
+                        <small>For production: set your own Firebase database instead of demo mode</small>
                     </div>
 
                     <div class="settings-section">

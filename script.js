@@ -10,15 +10,25 @@ function getStorageData(key) {
 
 // Optional shared database URL (Firebase Realtime Database REST endpoint)
 // Example: https://your-project-default-rtdb.firebaseio.com
+const DEMO_SHARED_ENDPOINT = 'https://jsonbin.io/b/mineguard_reports';
+
 function getCloudDatabaseUrl() {
     const runtimeValue = window.MINEGUARD_CLOUD_DB_URL;
     const persistedValue = localStorage.getItem('mineguardCloudDbUrl');
+    const demoMode = localStorage.getItem('mineguardDemoMode') === 'true';
     const value = (runtimeValue || persistedValue || '').trim();
+    
+    if (demoMode) {
+        return DEMO_SHARED_ENDPOINT;
+    }
+    
     return value.replace(/\/+$/, '');
 }
 
 function isCloudSyncEnabled() {
-    return /^https?:\/\//i.test(getCloudDatabaseUrl());
+    const isDemoMode = localStorage.getItem('mineguardDemoMode') === 'true';
+    const hasUrl = /^https?:\/\//i.test(getCloudDatabaseUrl());
+    return isDemoMode || hasUrl;
 }
 
 const cloudSyncState = {
@@ -177,14 +187,25 @@ function updateSyncStatusDisplay() {
     const statusIndicator = document.getElementById('syncStatusIndicator');
     const statusText = document.getElementById('syncStatusText');
     const cloudDbUrlInput = document.getElementById('cloudDbUrl');
+    const demoModeCheckbox = document.getElementById('demoModeToggle');
     
     if (!statusIndicator || !statusText) return;
     
+    const isDemoMode = localStorage.getItem('mineguardDemoMode') === 'true';
+    
+    if (demoModeCheckbox) {
+        demoModeCheckbox.checked = isDemoMode;
+    }
+    
     if (isCloudSyncEnabled()) {
         statusIndicator.className = 'status-indicator status-syncing';
-        statusText.textContent = '🔄 Cloud Sync Active';
+        if (isDemoMode) {
+            statusText.textContent = '🌐 Demo Shared Mode (Shared Testing)';
+        } else {
+            statusText.textContent = '🔄 Cloud Sync Active';
+        }
         if (cloudDbUrlInput) {
-            cloudDbUrlInput.value = getCloudDatabaseUrl();
+            cloudDbUrlInput.value = isDemoMode ? '' : getCloudDatabaseUrl();
         }
     } else {
         statusIndicator.className = 'status-indicator status-local';
@@ -204,6 +225,20 @@ function toggleAdminSettings() {
             updateSyncStatusDisplay();
         }
     }
+}
+
+function toggleDemoMode() {
+    const isCurrentlyEnabled = localStorage.getItem('mineguardDemoMode') === 'true';
+    if (isCurrentlyEnabled) {
+        localStorage.removeItem('mineguardDemoMode');
+        showToast('Demo mode disabled. Using local storage.', 'info');
+    } else {
+        localStorage.removeItem('mineguardCloudDbUrl');
+        localStorage.setItem('mineguardDemoMode', 'true');
+        showToast('Demo mode enabled! Reports now sync across all browsers testing this app.', 'success');
+    }
+    updateSyncStatusDisplay();
+    initializeCloudSync();
 }
 
 function saveCloudDbUrl() {
