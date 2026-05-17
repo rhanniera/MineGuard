@@ -173,9 +173,73 @@ function refreshVisibleReportViews() {
     }
 }
 
+function updateSyncStatusDisplay() {
+    const statusIndicator = document.getElementById('syncStatusIndicator');
+    const statusText = document.getElementById('syncStatusText');
+    const cloudDbUrlInput = document.getElementById('cloudDbUrl');
+    
+    if (!statusIndicator || !statusText) return;
+    
+    if (isCloudSyncEnabled()) {
+        statusIndicator.className = 'status-indicator status-syncing';
+        statusText.textContent = '🔄 Cloud Sync Active';
+        if (cloudDbUrlInput) {
+            cloudDbUrlInput.value = getCloudDatabaseUrl();
+        }
+    } else {
+        statusIndicator.className = 'status-indicator status-local';
+        statusText.textContent = '📱 Local Storage Only';
+        if (cloudDbUrlInput) {
+            cloudDbUrlInput.value = '';
+        }
+    }
+}
+
+function toggleAdminSettings() {
+    const settingsDiv = document.getElementById('adminSettings');
+    if (settingsDiv) {
+        const isHidden = settingsDiv.style.display === 'none';
+        settingsDiv.style.display = isHidden ? 'block' : 'none';
+        if (isHidden) {
+            updateSyncStatusDisplay();
+        }
+    }
+}
+
+function saveCloudDbUrl() {
+    const urlInput = document.getElementById('cloudDbUrl');
+    if (!urlInput) return;
+    
+    const url = urlInput.value.trim();
+    
+    if (!url) {
+        showToast('Please enter a valid Firebase Realtime Database URL', 'error');
+        return;
+    }
+    
+    if (!/^https?:\/\//i.test(url)) {
+        showToast('URL must start with http:// or https://', 'error');
+        return;
+    }
+    
+    localStorage.setItem('mineguardCloudDbUrl', url.replace(/\/+$/, ''));
+    showToast('Cloud database URL saved! Syncing will start automatically.', 'success');
+    updateSyncStatusDisplay();
+    initializeCloudSync();
+}
+
+function disableCloudSync() {
+    if (confirm('Disable cloud sync? Reports will remain local to this device.')) {
+        localStorage.removeItem('mineguardCloudDbUrl');
+        showToast('Cloud sync disabled. Using local storage only.', 'info');
+        updateSyncStatusDisplay();
+    }
+}
+
 function initializeCloudSync() {
     if (!isCloudSyncEnabled()) {
         console.info('Cloud sync disabled. Set window.MINEGUARD_CLOUD_DB_URL for multi-device syncing.');
+        updateSyncStatusDisplay();
         return;
     }
 
@@ -1056,6 +1120,8 @@ function loadAdminPanel() {
         showSection('home');
         return;
     }
+    
+    updateSyncStatusDisplay();
     
     const allReports = getStorageData('reports');
     const allUsers = getStorageData('users');

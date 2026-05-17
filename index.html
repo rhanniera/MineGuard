@@ -620,6 +620,35 @@
                     <button class="btn btn-secondary" onclick="exportReportsAsCSV()">
                         <i class="fas fa-download"></i> Export as CSV
                     </button>
+                    <button class="btn btn-secondary" onclick="toggleAdminSettings()">
+                        <i class="fas fa-cog"></i> Settings
+                    </button>
+                </div>
+            </div>
+
+            <div id="adminSettings" class="admin-settings" style="display: none;">
+                <div class="settings-card">
+                    <h3><i class="fas fa-cloud"></i> Cloud Sync Configuration</h3>
+                    <p class="settings-description">Configure a shared database URL to enable real-time hazard report syncing across multiple devices and locations.</p>
+                    
+                    <div class="settings-section">
+                        <label for="cloudDbUrl">Firebase Realtime Database URL</label>
+                        <input type="text" id="cloudDbUrl" placeholder="https://your-project-default-rtdb.firebaseio.com" class="settings-input">
+                        <small>Leave blank to disable cloud sync and use local storage only</small>
+                    </div>
+
+                    <div class="settings-section">
+                        <div class="sync-status">
+                            <span id="syncStatusIndicator" class="status-indicator status-local"></span>
+                            <span id="syncStatusText">Local Storage Only</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button class="btn btn-primary" onclick="saveCloudDbUrl()">Save Cloud URL</button>
+                        <button class="btn btn-danger" onclick="disableCloudSync()">Disable Cloud Sync</button>
+                        <button class="btn btn-secondary" onclick="toggleAdminSettings()">Close</button>
+                    </div>
                 </div>
             </div>
 
