@@ -595,6 +595,32 @@ function escapeHtml(text) {
     return text.replace(/[&<>"']/g, m => map[m]);
 }
 
+function addAdminNotification(title, message, type = 'info') {
+    // Add notification to admin by temporarily switching context
+    // Store the current notifications
+    const currentNotifs = getNotifications();
+    
+    // Create admin notification with admin flag
+    const adminNotification = {
+        id: Date.now(),
+        title,
+        message,
+        type,
+        timestamp: new Date().toISOString(),
+        read: false,
+        isAdminAlert: true
+    };
+    
+    // Add to main notifications so admin sees it when they log in
+    currentNotifs.unshift(adminNotification);
+    saveNotifications(currentNotifs);
+    
+    // If admin is currently logged in, update badge
+    if (isAdmin()) {
+        updateNotificationBadge();
+    }
+}
+
 function getCurrentUser() {
     return JSON.parse(localStorage.getItem('currentUser')) || null;
 }
@@ -945,6 +971,9 @@ async function handleSignup(e) {
     // Add notification for new user creation
     addNotification('New Account Created', `Welcome ${fullName}! Your account has been successfully created.`, 'success');
     
+    // Add notification to admin
+    addAdminNotification('New User Registration', `New user ${fullName} (${email}) from ${company} has registered.`, 'info');
+    
     showToast('Account created successfully and synced to cloud!', 'success');
     
     // Reset form and switch to login
@@ -1060,6 +1089,10 @@ function handleReportSubmit(e) {
     
     // Add notification for new hazard report
     addNotification('Hazard Report Submitted', `Your hazard report "${hazardTitle}" has been submitted successfully with ${severity} severity level.`, 'success');
+    
+    // Add notification to admin
+    const reporterName = anonymous ? 'Anonymous' : user.fullName;
+    addAdminNotification('New Hazard Report', `New ${severity} severity hazard report "${hazardTitle}" submitted by ${reporterName} from ${user.company}.`, 'warning');
     
     // Force immediate sync to cloud to ensure report is immediately visible to admin
     if (isCloudSyncEnabled()) {
@@ -1247,7 +1280,6 @@ function createReportCard(report) {
         <div class="report-actions">
             <button class="btn btn-primary" onclick="viewReport(${report.id})">View Details</button>
             ${report.status !== 'Resolved' ? `<button class="btn btn-secondary" onclick="editReport(${report.id})">Edit</button>` : ''}
-            <button class="btn btn-danger" onclick="deleteReport(${report.id})">Delete</button>
         </div>
     `;
     
@@ -1368,7 +1400,12 @@ function showUsersModal() {
         regularUsers.forEach(user => {
             usersHtml += `
                 <div style="border: 1px solid var(--border-light); padding: 1rem; margin-bottom: 1rem; border-radius: 6px; background: var(--bg-light);">
-                    <h4 style="margin-top: 0;">${user.fullName}</h4>
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <h4 style="margin-top: 0; flex: 1;">${user.fullName}</h4>
+                        <button class="btn btn-danger" onclick="deleteUser(${user.id})" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;" title="Delete this user">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
                     <div class="modal-info-row">
                         <span class="modal-info-label">Email:</span>
                         <span class="modal-info-value">${user.email}</span>
@@ -1404,6 +1441,34 @@ function showUsersModal() {
 function closeUsersModal() {
     const modal = document.getElementById('usersModal');
     modal.classList.remove('active');
+}
+
+function deleteUser(userId) {
+    if (confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
+        const allUsers = getStorageData('users');
+        const user = allUsers.find(u => u.id === userId);
+        
+        if (!user) {
+            showToast('User not found', 'error');
+            return;
+        }
+        
+        const filteredUsers = allUsers.filter(u => u.id !== userId);
+        saveStorageData('users', filteredUsers);
+        
+        // Also delete all reports from this user
+        const allReports = getStorageData('reports');
+        const filteredReports = allReports.filter(r => r.userId !== userId);
+        saveStorageData('reports', filteredReports);
+        
+        // Force cloud sync
+        if (isCloudSyncEnabled()) {
+            syncCloudData();
+        }
+        
+        showToast(`User ${user.fullName} and their reports have been deleted successfully`, 'success');
+        showUsersModal();
+    }
 }
 
 function addComment(reportId) {
