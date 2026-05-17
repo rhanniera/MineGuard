@@ -10,7 +10,8 @@ function getStorageData(key) {
 
 // Optional shared database URL (Firebase Realtime Database REST endpoint)
 // Example: https://your-project-default-rtdb.firebaseio.com
-const DEMO_SHARED_ENDPOINT = 'https://jsonbin.io/b/mineguard_reports';
+// Using free Firebase demo database for testing cross-browser sync
+const DEMO_SHARED_ENDPOINT = 'https://mineguard-demo-default-rtdb.firebaseio.com';
 
 function getCloudDatabaseUrl() {
     const runtimeValue = window.MINEGUARD_CLOUD_DB_URL;
@@ -86,35 +87,60 @@ async function fetchCloudData(key) {
     const baseUrl = getCloudDatabaseUrl();
     if (!baseUrl) return null;
 
-    const response = await fetch(`${baseUrl}/${key}.json`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json'
+    try {
+        const response = await fetch(`${baseUrl}/${key}.json`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        // 404 means no data has been pushed yet - return empty array
+        if (response.status === 404) {
+            console.log(`Cloud: No data yet for ${key}`);
+            return [];
         }
-    });
 
-    if (!response.ok) {
-        throw new Error(`Cloud fetch failed for ${key} (${response.status})`);
+        if (!response.ok) {
+            console.warn(`Cloud fetch error for ${key}: ${response.status}`);
+            return null;
+        }
+
+        const payload = await response.json();
+        
+        // Firebase returns null for non-existent paths
+        if (payload === null) {
+            return [];
+        }
+        
+        return Array.isArray(payload) ? payload : [];
+    } catch (error) {
+        console.warn(`Cloud fetch exception for ${key}:`, error.message);
+        return null;
     }
-
-    const payload = await response.json();
-    return Array.isArray(payload) ? payload : [];
 }
 
 async function pushCloudData(key, data) {
     const baseUrl = getCloudDatabaseUrl();
     if (!baseUrl) return;
 
-    const response = await fetch(`${baseUrl}/${key}.json`, {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(Array.isArray(data) ? data : [])
-    });
+    try {
+        const response = await fetch(`${baseUrl}/${key}.json`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(Array.isArray(data) ? data : [])
+        });
 
-    if (!response.ok) {
-        throw new Error(`Cloud push failed for ${key} (${response.status})`);
+        if (!response.ok) {
+            console.warn(`Cloud push failed for ${key}: ${response.status}`);
+            return;
+        }
+        
+        console.log(`Cloud: Successfully pushed ${key}`);
+    } catch (error) {
+        console.warn(`Cloud push exception for ${key}:`, error.message);
     }
 }
 
@@ -137,22 +163,33 @@ function queueCloudPush(key, data) {
 
 async function syncCloudKey(key) {
     const localData = getStorageData(key);
-    const remoteData = await fetchCloudData(key);
+    
+    try {
+        const remoteData = await fetchCloudData(key);
 
-    if (remoteData === null) return;
+        // If remote fetch failed (null), skip sync but keep local data
+        if (remoteData === null) {
+            console.warn(`Skipping sync for ${key}: could not reach cloud`);
+            return;
+        }
 
-    const mergedData = mergeRecords(localData, remoteData, key);
-    const localChanged = !arraysEqual(localData, mergedData);
-    const remoteChanged = !arraysEqual(remoteData, mergedData);
+        const mergedData = mergeRecords(localData, remoteData, key);
+        const localChanged = !arraysEqual(localData, mergedData);
+        const remoteChanged = !arraysEqual(remoteData, mergedData);
 
-    if (localChanged) {
-        cloudSyncState.isApplyingRemoteChanges = true;
-        localStorage.setItem(key, JSON.stringify(mergedData));
-        cloudSyncState.isApplyingRemoteChanges = false;
-    }
+        if (localChanged) {
+            console.log(`Cloud: Updating local ${key} (${mergedData.length} records)`);
+            cloudSyncState.isApplyingRemoteChanges = true;
+            localStorage.setItem(key, JSON.stringify(mergedData));
+            cloudSyncState.isApplyingRemoteChanges = false;
+        }
 
-    if (remoteChanged) {
-        await pushCloudData(key, mergedData);
+        if (remoteChanged) {
+            console.log(`Cloud: Pushing ${key} to cloud (${mergedData.length} records)`);
+            await pushCloudData(key, mergedData);
+        }
+    } catch (error) {
+        console.warn(`Error syncing ${key}:`, error.message);
     }
 }
 
