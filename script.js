@@ -336,6 +336,12 @@ function isAdmin() {
 // ============================
 
 document.addEventListener('DOMContentLoaded', function () {
+    // Enable demo mode by default if cloud sync is not configured
+    if (!localStorage.getItem('mineguardDemoMode') && !localStorage.getItem('mineguardCloudDbUrl')) {
+        localStorage.setItem('mineguardDemoMode', 'true');
+        console.log('Demo mode auto-enabled for cloud sync');
+    }
+    
     initializeAdminAccount();
     initializeCloudSync();
     initializeApp();
