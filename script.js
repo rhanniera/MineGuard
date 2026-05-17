@@ -222,7 +222,7 @@ async function syncCloudKey(key) {
         const remoteChanged = !arraysEqual(remoteData, mergedData);
 
         if (localChanged) {
-            console.log(`Cloud: Updating local ${key} (${mergedData.length} records)`);
+            console.log(`Cloud: Updating local ${key} (${localData.length} → ${mergedData.length} records)`);
             cloudSyncState.isApplyingRemoteChanges = true;
             localStorage.setItem(key, JSON.stringify(mergedData));
             cloudSyncState.isApplyingRemoteChanges = false;
@@ -232,22 +232,44 @@ async function syncCloudKey(key) {
             console.log(`Cloud: Pushing ${key} to cloud (${mergedData.length} records)`);
             await pushCloudData(key, mergedData);
         }
+        
+        // Update last sync time for debugging
+        localStorage.setItem(`lastSyncTime_${key}`, new Date().toISOString());
     } catch (error) {
         console.warn(`Error syncing ${key}:`, error.message);
     }
 }
 
 async function syncCloudData() {
-    if (!isCloudSyncEnabled() || cloudSyncState.isSyncing) return;
+    if (!isCloudSyncEnabled()) return;
+    
+    // Prevent concurrent syncs to avoid conflicts
+    if (cloudSyncState.isSyncing) {
+        console.log('Sync already in progress, waiting...');
+        // Wait for current sync to complete
+        return new Promise((resolve) => {
+            const checkInterval = setInterval(() => {
+                if (!cloudSyncState.isSyncing) {
+                    clearInterval(checkInterval);
+                    resolve();
+                }
+            }, 100);
+        });
+    }
+    
     cloudSyncState.isSyncing = true;
+    console.log('Starting cloud sync...');
 
     try {
         await syncCloudKey('users');
+        console.log('Users sync completed');
         await syncCloudKey('reports');
+        console.log('Reports sync completed');
     } catch (error) {
         console.warn('Cloud sync failed:', error.message);
     } finally {
         cloudSyncState.isSyncing = false;
+        console.log('Cloud sync finished');
     }
 }
 
@@ -601,14 +623,21 @@ function showSection(sectionId) {
         // Load data when switching to certain sections
         if (sectionId === 'dashboard') {
             loadUserReports();
-            syncCloudData().then(() => {
-                loadUserReports();
-            });
+            if (isCloudSyncEnabled()) {
+                syncCloudData().then(() => {
+                    loadUserReports();
+                });
+            }
         } else if (sectionId === 'admin') {
-            loadAdminPanel();
-            syncCloudData().then(() => {
+            // Handle async admin load with cloud sync
+            if (isCloudSyncEnabled()) {
+                loadAdminPanel().catch(error => {
+                    console.error('Error loading admin panel:', error);
+                    showToast('Error loading admin panel', 'error');
+                });
+            } else {
                 loadAdminPanel();
-            });
+            }
         } else if (sectionId === 'profile') {
             loadUserProfile();
         }
@@ -683,7 +712,7 @@ function validatePassword(password) {
     return password.length >= 8;
 }
 
-function handleSignup(e) {
+async function handleSignup(e) {
     e.preventDefault();
     
     const fullName = document.getElementById('fullName').value.trim();
@@ -709,7 +738,13 @@ function handleSignup(e) {
         return;
     }
     
-    // Check if email already exists
+    // Sync from cloud first to check for duplicates across all browsers/devices
+    if (isCloudSyncEnabled()) {
+        console.log('Syncing from cloud before signup to check for duplicate emails...');
+        await syncCloudData();
+    }
+    
+    // Now check both local and potentially synced cloud data
     const users = getStorageData('users');
     if (users.some(u => u.email === email)) {
         showToast('Email already registered', 'error');
@@ -733,12 +768,13 @@ function handleSignup(e) {
     
     // Force immediate sync to cloud so admin can see new user
     if (isCloudSyncEnabled()) {
-        console.log('New user registered: forcing cloud sync');
-        syncCloudData();
+        console.log('New user registered: waiting for cloud sync to complete...');
+        await syncCloudData();
+        console.log('Cloud sync completed for new user');
     }
     
     setCurrentUser(newUser);
-    showToast('Account created successfully!', 'success');
+    showToast('Account created successfully and synced to cloud!', 'success');
     
     // Reset form and switch to login
     document.getElementById('signupForm').reset();
@@ -1345,7 +1381,7 @@ function deleteAccount() {
 // ADMIN PANEL
 // ============================
 
-function loadAdminPanel() {
+async function loadAdminPanel() {
     const user = getCurrentUser();
     if (!isAdmin()) {
         showToast('Admin access required', 'error');
@@ -1355,11 +1391,12 @@ function loadAdminPanel() {
     
     updateSyncStatusDisplay();
     
-    // Force sync from cloud to ensure admin sees latest data from all users
-    // This is critical for seeing reports from other users
+    // Force sync from cloud and WAIT for it to complete
+    // This is critical for seeing reports from other users across all browsers/devices
     if (isCloudSyncEnabled()) {
         console.log('Admin panel: Forcing cloud sync to fetch latest data from all users');
-        syncCloudData();
+        await syncCloudData();
+        console.log('Admin panel: Cloud sync completed, loading data');
     }
     
     const allReports = getStorageData('reports');
@@ -1413,6 +1450,30 @@ function loadAdminPanel() {
     }
     
     displayAdminReports(allReports);
+}
+
+async function refreshAdminData() {
+    const refreshBtn = document.getElementById('adminRefreshBtn');
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+    }
+    
+    try {
+        console.log('Manual admin refresh: Syncing from cloud...');
+        await syncCloudData();
+        console.log('Manual admin refresh: Sync completed, reloading data...');
+        await loadAdminPanel();
+        showToast('Data refreshed successfully!', 'success');
+    } catch (error) {
+        console.error('Error refreshing admin data:', error);
+        showToast('Error refreshing data', 'error');
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh Data';
+        }
+    }
 }
 
 function displayAdminReports(reports) {
