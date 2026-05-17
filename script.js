@@ -12,6 +12,7 @@ function getStorageData(key) {
 // Example JSONBin: https://api.jsonbin.io/v3/b/YOUR_BIN_ID
 // Example Firebase: https://your-project-default-rtdb.firebaseio.com
 const DEMO_SHARED_ENDPOINT = 'https://api.jsonbin.io/v3/b/6a094d96250b1311c360c7ce';
+const JSONBIN_MASTER_KEY = '$2a$10$fVqQW8fZrgNXj9Q28zQRY.o3vzbZFrMJH9QrgbxS8TWKejKg.Geoi';
 
 function getCloudDatabaseUrl() {
     const runtimeValue = window.MINEGUARD_CLOUD_DB_URL;
@@ -89,11 +90,16 @@ async function fetchCloudData(key) {
 
     try {
         let fetchUrl = baseUrl;
+        let headers = {
+            'Content-Type': 'application/json'
+        };
         
         // Handle both JSONBin and Firebase URL formats
         if (baseUrl.includes('jsonbin.io')) {
             // JSONBin: use base URL directly, no key appended
             fetchUrl = baseUrl;
+            // Add authentication header for JSONBin
+            headers['X-Master-Key'] = JSONBIN_MASTER_KEY;
         } else {
             // Firebase: append key.json
             fetchUrl = `${baseUrl}/${key}.json`;
@@ -101,9 +107,7 @@ async function fetchCloudData(key) {
         
         const response = await fetch(fetchUrl, {
             method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            headers: headers
         });
 
         // 404 means no data has been pushed yet - return empty array
@@ -147,14 +151,20 @@ async function pushCloudData(key, data) {
 
     try {
         let fetchUrl = baseUrl;
+        let headers = {
+            'Content-Type': 'application/json'
+        };
         let body;
         
         // Handle both JSONBin and Firebase URL formats
         if (baseUrl.includes('jsonbin.io')) {
             // JSONBin: need to push entire object with both users and reports
+            fetchUrl = baseUrl;
             const users = key === 'users' ? data : getStorageData('users');
             const reports = key === 'reports' ? data : getStorageData('reports');
             body = JSON.stringify({ users, reports });
+            // Add authentication header for JSONBin
+            headers['X-Master-Key'] = JSONBIN_MASTER_KEY;
         } else {
             // Firebase: push individual key
             fetchUrl = `${baseUrl}/${key}.json`;
@@ -163,9 +173,7 @@ async function pushCloudData(key, data) {
         
         const response = await fetch(fetchUrl, {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: headers,
             body: body
         });
 
