@@ -5,6 +5,31 @@
 // Global variable to track if we're in edit mode
 let currentEditingReportId = null;
 
+// Deletion tracking to prevent deleted items from being restored by cloud sync
+function getDeletedRecords() {
+    const data = localStorage.getItem('deletedRecords');
+    return data ? JSON.parse(data) : { users: [], reports: [] };
+}
+
+function saveDeletedRecords(deletions) {
+    localStorage.setItem('deletedRecords', JSON.stringify(deletions));
+    // Also push to cloud so deletion is respected across all devices
+    if (isCloudSyncEnabled()) {
+        queueCloudPush('deletedRecords', deletions);
+    }
+}
+
+function addToDeletedRecords(keyName, id) {
+    const deletions = getDeletedRecords();
+    if (!deletions[keyName]) {
+        deletions[keyName] = [];
+    }
+    if (!deletions[keyName].includes(id)) {
+        deletions[keyName].push(id);
+        saveDeletedRecords(deletions);
+    }
+}
+
 // Get data from localStorage or initialize empty arrays
 function getStorageData(key) {
     const data = localStorage.getItem(key);
@@ -62,6 +87,10 @@ function mergeRecords(localRecords, remoteRecords, keyName) {
     const localArray = Array.isArray(localRecords) ? localRecords : [];
     const remoteArray = Array.isArray(remoteRecords) ? remoteRecords : [];
     const mergedMap = new Map();
+    
+    // Get the deletion registry
+    const deletions = getDeletedRecords();
+    const deletedIds = deletions[keyName] || [];
 
     localArray.forEach(item => {
         const mergeKey = getMergeKey(item, keyName);
@@ -76,11 +105,16 @@ function mergeRecords(localRecords, remoteRecords, keyName) {
         }
     });
 
-    return Array.from(mergedMap.values()).sort((a, b) => {
-        const aVersion = getRecordVersion(a);
-        const bVersion = getRecordVersion(b);
-        return aVersion - bVersion;
-    });
+    // Filter out deleted items
+    const result = Array.from(mergedMap.values())
+        .filter(item => !deletedIds.includes(item.id))
+        .sort((a, b) => {
+            const aVersion = getRecordVersion(a);
+            const bVersion = getRecordVersion(b);
+            return aVersion - bVersion;
+        });
+    
+    return result;
 }
 
 function arraysEqual(a, b) {
@@ -209,6 +243,42 @@ function queueCloudPush(key, data) {
 }
 
 async function syncCloudKey(key) {
+    // Special handling for deletedRecords (which is an object, not an array)
+    if (key === 'deletedRecords') {
+        const localDeletions = getDeletedRecords();
+        
+        try {
+            const remoteDeletions = await fetchCloudData(key) || { users: [], reports: [] };
+
+            // Merge deletion registries - combine all deletions
+            const mergedDeletions = {
+                users: [...new Set([...(localDeletions.users || []), ...(remoteDeletions.users || [])])],
+                reports: [...new Set([...(localDeletions.reports || []), ...(remoteDeletions.reports || [])])]
+            };
+
+            const localChanged = !arraysEqual(localDeletions, mergedDeletions);
+            const remoteChanged = !arraysEqual(remoteDeletions, mergedDeletions);
+
+            if (localChanged) {
+                console.log(`Cloud: Updating local deletedRecords`);
+                cloudSyncState.isApplyingRemoteChanges = true;
+                saveDeletedRecords(mergedDeletions);
+                cloudSyncState.isApplyingRemoteChanges = false;
+            }
+
+            if (remoteChanged) {
+                console.log(`Cloud: Pushing deletedRecords to cloud`);
+                await pushCloudData(key, mergedDeletions);
+            }
+            
+            localStorage.setItem(`lastSyncTime_${key}`, new Date().toISOString());
+        } catch (error) {
+            console.warn(`Error syncing ${key}:`, error.message);
+        }
+        return;
+    }
+    
+    // Standard array-based sync for users and reports
     const localData = getStorageData(key);
     
     try {
@@ -264,6 +334,8 @@ async function syncCloudData() {
     console.log('Starting cloud sync...');
 
     try {
+        await syncCloudKey('deletedRecords');
+        console.log('Deletions sync completed');
         await syncCloudKey('users');
         console.log('Users sync completed');
         await syncCloudKey('reports');
@@ -1111,6 +1183,16 @@ function handleReportSubmit(e) {
 function deleteReport(reportId) {
     if (confirm('Are you sure you want to delete this report?')) {
         const reports = getStorageData('reports');
+        const report = reports.find(r => r.id === reportId);
+        
+        if (!report) {
+            showToast('Report not found', 'error');
+            return;
+        }
+        
+        // Register the deletion
+        addToDeletedRecords('reports', reportId);
+        
         const filteredReports = reports.filter(r => r.id !== reportId);
         saveStorageData('reports', filteredReports);
         showToast('Report deleted successfully', 'success');
@@ -1453,12 +1535,23 @@ function deleteUser(userId) {
             return;
         }
         
+        // Register the user deletion
+        addToDeletedRecords('users', userId);
+        
         const filteredUsers = allUsers.filter(u => u.id !== userId);
         saveStorageData('users', filteredUsers);
         
         // Also delete all reports from this user
         const allReports = getStorageData('reports');
         const filteredReports = allReports.filter(r => r.userId !== userId);
+        
+        // Register each report deletion
+        allReports.forEach(r => {
+            if (r.userId === userId) {
+                addToDeletedRecords('reports', r.id);
+            }
+        });
+        
         saveStorageData('reports', filteredReports);
         
         // Force cloud sync
@@ -1847,8 +1940,24 @@ function adminDeleteReport(reportId) {
     
     if (confirm('Are you sure you want to permanently delete this report? This action cannot be undone.')) {
         const reports = getStorageData('reports');
+        const report = reports.find(r => r.id === reportId);
+        
+        if (!report) {
+            showToast('Report not found', 'error');
+            return;
+        }
+        
+        // Register the deletion
+        addToDeletedRecords('reports', reportId);
+        
         const filteredReports = reports.filter(r => r.id !== reportId);
         saveStorageData('reports', filteredReports);
+        
+        // Force cloud sync
+        if (isCloudSyncEnabled()) {
+            syncCloudData();
+        }
+        
         showToast('Report deleted successfully', 'success');
         loadAdminPanel();
     }
