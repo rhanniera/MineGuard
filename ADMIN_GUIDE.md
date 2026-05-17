@@ -3,6 +3,17 @@
 ## Overview
 The MineGuard Admin Panel provides comprehensive database management and reporting capabilities for administrators. All hazard reports submitted by users are stored securely and can only be accessed and managed by administrators.
 
+## Cross-Device Sync Setup (Required for Different Locations)
+By default, browsers store data in local storage, which is isolated per device. To make reports appear in the admin dashboard across different users and locations, configure a shared Firebase Realtime Database URL.
+
+1. Create a Firebase Realtime Database project.
+2. Set database rules to allow your intended reads/writes.
+3. In browser console (or app bootstrap), set:
+        localStorage.setItem('mineguardCloudDbUrl', 'https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com')
+4. Reload the app on both reporter and admin devices.
+
+Once configured, the app automatically syncs users and reports every few seconds and when tabs regain focus.
+
 ## Admin Credentials
 - **Email:** admin@admin.com
 - **Password:** Totheremix123!
