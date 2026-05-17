@@ -2,6 +2,9 @@
 // DATA MANAGEMENT & STORAGE
 // ============================
 
+// Global variable to track if we're in edit mode
+let currentEditingReportId = null;
+
 // Get data from localStorage or initialize empty arrays
 function getStorageData(key) {
     const data = localStorage.getItem(key);
@@ -441,6 +444,157 @@ function saveStorageData(key, data) {
     queueCloudPush(key, data);
 }
 
+// ============================
+// NOTIFICATION MANAGEMENT
+// ============================
+
+function getNotifications() {
+    const data = localStorage.getItem('notifications');
+    return data ? JSON.parse(data) : [];
+}
+
+function saveNotifications(notifications) {
+    localStorage.setItem('notifications', JSON.stringify(notifications));
+}
+
+function addNotification(title, message, type = 'info') {
+    const notifications = getNotifications();
+    const notification = {
+        id: Date.now(),
+        title,
+        message,
+        type, // 'info', 'success', 'warning', 'error'
+        timestamp: new Date().toISOString(),
+        read: false
+    };
+    notifications.unshift(notification); // Add to beginning
+    saveNotifications(notifications);
+    updateNotificationBadge();
+    return notification;
+}
+
+function updateNotificationBadge() {
+    const notifications = getNotifications();
+    const unreadCount = notifications.filter(n => !n.read).length;
+    const badge = document.getElementById('notificationBadge');
+    
+    if (unreadCount > 0) {
+        badge.textContent = unreadCount;
+        badge.style.display = 'block';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+function showNotifications() {
+    const notifications = getNotifications();
+    const list = document.getElementById('notificationList');
+    
+    if (notifications.length === 0) {
+        list.innerHTML = `
+            <div class="empty-notification">
+                <i class="fas fa-bell-slash"></i>
+                <p>No notifications yet</p>
+            </div>
+        `;
+        return;
+    }
+    
+    list.innerHTML = notifications.map(notif => {
+        const date = new Date(notif.timestamp);
+        const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dateStr = date.toLocaleDateString();
+        return `
+            <div class="notification-item-row ${notif.read ? 'read' : 'unread'}" onclick="markNotificationAsRead(${notif.id})">
+                <div class="notification-icon-type">
+                    <i class="fas fa-${
+                        notif.type === 'success' ? 'check-circle' :
+                        notif.type === 'error' ? 'exclamation-circle' :
+                        notif.type === 'warning' ? 'exclamation-triangle' :
+                        'info-circle'
+                    }"></i>
+                </div>
+                <div class="notification-content">
+                    <div class="notification-title">${escapeHtml(notif.title)}</div>
+                    <div class="notification-message">${escapeHtml(notif.message)}</div>
+                    <div class="notification-time">${dateStr} at ${timeStr}</div>
+                </div>
+                <button class="notification-delete" onclick="deleteNotification(event, ${notif.id})" title="Delete notification">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+    }).join('');
+}
+
+function toggleNotificationDropdown(e) {
+    e.preventDefault();
+    const dropdown = document.getElementById('notificationDropdown');
+    dropdown.classList.toggle('show');
+    if (dropdown.classList.contains('show')) {
+        showNotifications();
+        markAllNotificationsAsRead();
+    }
+}
+
+function deleteNotification(e, notificationId) {
+    e.preventDefault();
+    e.stopPropagation();
+    const notifications = getNotifications();
+    const filtered = notifications.filter(n => n.id !== notificationId);
+    saveNotifications(filtered);
+    showNotifications();
+    updateNotificationBadge();
+}
+
+function markNotificationAsRead(notificationId) {
+    const notifications = getNotifications();
+    const notif = notifications.find(n => n.id === notificationId);
+    if (notif) {
+        notif.read = true;
+        saveNotifications(notifications);
+        updateNotificationBadge();
+        showNotifications();
+    }
+}
+
+function markAllNotificationsAsRead() {
+    const notifications = getNotifications();
+    notifications.forEach(n => n.read = true);
+    saveNotifications(notifications);
+    updateNotificationBadge();
+}
+
+function clearAllNotifications() {
+    if (confirm('Are you sure you want to clear all notifications? This action cannot be undone.')) {
+        saveNotifications([]);
+        showNotifications();
+        updateNotificationBadge();
+        showToast('All notifications cleared', 'success');
+    }
+}
+
+function initializeNotifications() {
+    const user = getCurrentUser();
+    if (user) {
+        document.getElementById('notificationItem').style.display = 'block';
+        updateNotificationBadge();
+    } else {
+        document.getElementById('notificationItem').style.display = 'none';
+    }
+}
+
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
 function getCurrentUser() {
     return JSON.parse(localStorage.getItem('currentUser')) || null;
 }
@@ -525,6 +679,7 @@ function initializeApp() {
         
         loadUserProfile();
         loadUserReports();
+        initializeNotifications();
     } else {
         // User is logged out
         document.getElementById('logoutBtn').style.display = 'none';
@@ -533,6 +688,7 @@ function initializeApp() {
         document.getElementById('loginBtn').style.display = 'block';
         document.getElementById('signupBtn').style.display = 'block';
         showSection('home');
+        initializeNotifications();
     }
 }
 
@@ -585,6 +741,17 @@ function setupEventListeners() {
             }
         });
     }
+    
+    // Close notification dropdown when clicking outside
+    document.addEventListener('click', function(event) {
+        const notificationDropdown = document.getElementById('notificationDropdown');
+        const notificationIcon = document.querySelector('.notification-icon');
+        if (notificationDropdown && notificationIcon) {
+            if (!notificationDropdown.contains(event.target) && !notificationIcon.contains(event.target)) {
+                notificationDropdown.classList.remove('show');
+            }
+        }
+    });
 }
 
 // ============================
@@ -774,6 +941,10 @@ async function handleSignup(e) {
     }
     
     setCurrentUser(newUser);
+    
+    // Add notification for new user creation
+    addNotification('New Account Created', `Welcome ${fullName}! Your account has been successfully created.`, 'success');
+    
     showToast('Account created successfully and synced to cloud!', 'success');
     
     // Reset form and switch to login
@@ -841,6 +1012,12 @@ function logout() {
 function handleReportSubmit(e) {
     e.preventDefault();
     
+    // Check if we're in edit mode
+    if (currentEditingReportId !== null) {
+        updateReport(currentEditingReportId);
+        return;
+    }
+    
     const user = getCurrentUser();
     if (!user) {
         showToast('Please log in first', 'error');
@@ -881,6 +1058,9 @@ function handleReportSubmit(e) {
     reports.push(newReport);
     saveStorageData('reports', reports);
     
+    // Add notification for new hazard report
+    addNotification('Hazard Report Submitted', `Your hazard report "${hazardTitle}" has been submitted successfully with ${severity} severity level.`, 'success');
+    
     // Force immediate sync to cloud to ensure report is immediately visible to admin
     if (isCloudSyncEnabled()) {
         syncCloudData();
@@ -919,6 +1099,9 @@ function editReport(reportId) {
         return;
     }
     
+    // Set edit mode
+    currentEditingReportId = reportId;
+    
     // Pre-fill the form
     document.getElementById('hazardTitle').value = report.hazardTitle;
     document.getElementById('hazardDescription').value = report.description;
@@ -927,15 +1110,17 @@ function editReport(reportId) {
     document.getElementById('dateObserved').value = report.dateObserved;
     document.getElementById('timeObserved').value = report.timeObserved;
     
-    // Update the form submit handler to update instead of create
-    const form = document.getElementById('hazardForm');
-    form.onsubmit = function(e) {
-        e.preventDefault();
-        updateReport(reportId);
-    };
+    // Update button text
+    const submitButton = document.querySelector('#hazardForm button[type="submit"]');
+    if (submitButton) {
+        submitButton.textContent = 'Save Changes';
+    }
     
     showSection('report');
-    document.querySelector('.section-header p').textContent = 'Edit your hazard report';
+    const headerP = document.querySelector('#report .section-header p');
+    if (headerP) {
+        headerP.textContent = 'Edit your hazard report';
+    }
 }
 
 function updateReport(reportId) {
@@ -949,23 +1134,54 @@ function updateReport(reportId) {
     
     const report = reports[reportIndex];
     
-    report.hazardTitle = document.getElementById('hazardTitle').value.trim();
-    report.description = document.getElementById('hazardDescription').value.trim();
-    report.location = document.getElementById('location').value.trim();
-    report.severity = document.getElementById('severity').value;
-    report.dateObserved = document.getElementById('dateObserved').value;
-    report.timeObserved = document.getElementById('timeObserved').value;
+    const hazardTitle = document.getElementById('hazardTitle').value.trim();
+    const description = document.getElementById('hazardDescription').value.trim();
+    const location = document.getElementById('location').value.trim();
+    const severity = document.getElementById('severity').value;
+    const dateObserved = document.getElementById('dateObserved').value;
+    const timeObserved = document.getElementById('timeObserved').value;
+    
+    if (!hazardTitle || !description || !location || !severity || !dateObserved || !timeObserved) {
+        showToast('Please fill all required fields', 'error');
+        return;
+    }
+    
+    report.hazardTitle = hazardTitle;
+    report.description = description;
+    report.location = location;
+    report.severity = severity;
+    report.dateObserved = dateObserved;
+    report.timeObserved = timeObserved;
     report.lastUpdated = new Date().toISOString();
     
     reports[reportIndex] = report;
     saveStorageData('reports', reports);
     
+    // Add notification for updated hazard report
+    addNotification('Hazard Report Updated', `Your hazard report "${hazardTitle}" has been updated successfully.`, 'success');
+    
+    // Force immediate sync to cloud
+    if (isCloudSyncEnabled()) {
+        syncCloudData();
+    }
+    
     showToast('Report updated successfully!', 'success');
     document.getElementById('hazardForm').reset();
     
-    // Reset form submit handler
-    const form = document.getElementById('hazardForm');
-    form.onsubmit = handleReportSubmit;
+    // Reset edit mode
+    currentEditingReportId = null;
+    
+    // Reset button text
+    const submitButton = document.querySelector('#hazardForm button[type="submit"]');
+    if (submitButton) {
+        submitButton.textContent = 'Submit Hazard Report';
+    }
+    
+    // Reset header text
+    const headerP = document.querySelector('#report .section-header p');
+    if (headerP) {
+        headerP.textContent = 'Help us maintain a safe mining environment by reporting hazards immediately';
+    }
     
     setTimeout(() => {
         showSection('dashboard');
