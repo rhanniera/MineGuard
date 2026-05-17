@@ -543,6 +543,26 @@ function setupEventListeners() {
     document.querySelectorAll('.nav-link').forEach(link => {
         link.addEventListener('click', closeMobileMenu);
     });
+    
+    // Close modals when clicking outside the modal content
+    const reportModal = document.getElementById('reportModal');
+    const usersModal = document.getElementById('usersModal');
+    
+    if (reportModal) {
+        reportModal.addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeModal();
+            }
+        });
+    }
+    
+    if (usersModal) {
+        usersModal.addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeUsersModal();
+            }
+        });
+    }
 }
 
 // ============================
@@ -1079,6 +1099,61 @@ function closeModal() {
     modal.classList.remove('active');
 }
 
+function showUsersModal() {
+    const allUsers = getStorageData('users');
+    const regularUsers = allUsers.filter(u => !u.isAdmin);
+    
+    const modal = document.getElementById('usersModal');
+    const modalBody = document.getElementById('usersModalBody');
+    
+    let usersHtml = '<h2>Registered Users</h2>';
+    usersHtml += `<p style="color: var(--text-light); margin-bottom: 1.5rem;">Total Users: ${regularUsers.length}</p>`;
+    
+    if (regularUsers.length === 0) {
+        usersHtml += '<p style="text-align: center; color: var(--text-light);">No registered users yet</p>';
+    } else {
+        usersHtml += '<div style="overflow-y: auto; max-height: 500px;">';
+        regularUsers.forEach(user => {
+            usersHtml += `
+                <div style="border: 1px solid var(--border-light); padding: 1rem; margin-bottom: 1rem; border-radius: 6px; background: var(--bg-light);">
+                    <h4 style="margin-top: 0;">${user.fullName}</h4>
+                    <div class="modal-info-row">
+                        <span class="modal-info-label">Email:</span>
+                        <span class="modal-info-value">${user.email}</span>
+                    </div>
+                    <div class="modal-info-row">
+                        <span class="modal-info-label">Company:</span>
+                        <span class="modal-info-value">${user.company}</span>
+                    </div>
+                    <div class="modal-info-row">
+                        <span class="modal-info-label">Job Role:</span>
+                        <span class="modal-info-value">${user.jobRole}</span>
+                    </div>
+                    <div class="modal-info-row">
+                        <span class="modal-info-label">Member Since:</span>
+                        <span class="modal-info-value">${user.memberSince}</span>
+                    </div>
+                </div>
+            `;
+        });
+        usersHtml += '</div>';
+    }
+    
+    usersHtml += `
+        <div class="modal-actions" style="margin-top: 1.5rem;">
+            <button class="btn btn-secondary" onclick="closeUsersModal()">Close</button>
+        </div>
+    `;
+    
+    modalBody.innerHTML = usersHtml;
+    modal.classList.add('active');
+}
+
+function closeUsersModal() {
+    const modal = document.getElementById('usersModal');
+    modal.classList.remove('active');
+}
+
 function addComment(reportId) {
     const commentText = document.getElementById('commentInput').value.trim();
     
@@ -1307,7 +1382,7 @@ function loadAdminPanel() {
     document.getElementById('adminPendingReports').textContent = stats.pending;
     document.getElementById('adminAvgTime').textContent = stats.avgTime;
     
-    // Add additional stats display
+    // Add additional stats display with clickable total users
     const statsContainer = document.querySelector('.admin-stats');
     if (statsContainer && !document.getElementById('adminHighReports')) {
         const additionalStats = `
@@ -1323,13 +1398,14 @@ function loadAdminPanel() {
                 <h4>Resolved</h4>
                 <p id="adminResolvedReports">${stats.resolved}</p>
             </div>
-            <div class="stat-card">
+            <div class="stat-card" style="cursor: pointer; transition: all 0.3s ease;" onmouseover="this.style.transform='translateY(-5px)'; this.style.boxShadow='0 10px 25px rgba(0,0,0,0.15)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';" onclick="showUsersModal()">
                 <h4>Total Users</h4>
-                <p id="adminTotalUsers">${stats.totalUsers}</p>
+                <p id="adminTotalUsers" style="margin: 0;">${stats.totalUsers}</p>
+                <p style="font-size: 0.85rem; color: var(--text-light); margin-top: 0.5rem;">Click to view list</p>
             </div>
         `;
         statsContainer.insertAdjacentHTML('beforeend', additionalStats);
-    } else {
+    } else if (document.getElementById('adminHighReports')) {
         document.getElementById('adminHighReports').textContent = stats.high;
         document.getElementById('adminInReviewReports').textContent = stats.inReview;
         document.getElementById('adminResolvedReports').textContent = stats.resolved;
