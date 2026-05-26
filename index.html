@@ -643,7 +643,7 @@
                     <button class="btn btn-secondary" onclick="exportReportsAsCSV()">
                         <i class="fas fa-download"></i> Export as CSV
                     </button>
-                    <button class="btn btn-secondary" onclick="toggleAdminSettings()">
+                    <butto class="btn btn-secondary" onclick="toggleAdminSettings()">
                         <i class="fas fa-cog"></i> Settings
                     </button>
                 </div>
@@ -738,6 +738,15 @@
         </div>
     </footer>
 
+    <!-- Configure SQL API Backend -->
+    <script>
+        window.MINEGUARD_API_URL = 'http://localhost:3001/api';
+    </script>
+
+    <!-- SQL API Integration Module (NEW) -->
+    <script src="sql-api-integration.js"></script>
+
+    <!-- Main Application -->
     <script src="script.js"></script>
 </body>
 </html>

@@ -450,55 +450,85 @@ function disableCloudSync() {
 }
 
 function initializeCloudSync() {
-    if (!isCloudSyncEnabled()) {
-        console.info('Cloud sync disabled. Set window.MINEGUARD_CLOUD_DB_URL for multi-device syncing.');
-        updateSyncStatusDisplay();
-        // Setup localStorage cross-tab sync as fallback
-        setupLocalStorageSync();
-        return;
-    }
-
-    console.info('Cloud sync enabled. Starting sync...');
-    
-    // Force immediate sync to ensure admin user and all data is pushed to cloud
-    // This is critical to prevent sync conflicts when multiple users interact
-    syncCloudData().then(() => {
-        console.log('Initial cloud sync completed');
-        // Clear the admin sync flag after successful sync
-        localStorage.removeItem('adminSyncRequired');
-        refreshVisibleReportViews();
-    });
-
-    if (cloudSyncState.pollIntervalId) {
-        clearInterval(cloudSyncState.pollIntervalId);
-    }
-
-    // Poll cloud for changes every 7 seconds
-    cloudSyncState.pollIntervalId = setInterval(() => {
-        syncCloudData().then(() => {
-            refreshVisibleReportViews();
-        });
-    }, 7000);
-
-    window.addEventListener('focus', () => {
-        syncCloudData().then(() => {
-            refreshVisibleReportViews();
-        });
-    });
-
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            syncCloudData().then(() => {
-                refreshVisibleReportViews();
+    // Check if backend API is available
+    checkSqlApiHealth()
+        .then(isHealthy => {
+            if (!isHealthy) {
+                console.warn('SQL API not available, using localStorage only');
+                updateSyncStatusDisplay();
+                setupLocalStorageSync();
+                return;
+            }
+            
+            console.info('SQL API available, starting real-time sync...');
+            updateSyncStatusDisplay();
+            
+            // Initial sync
+            syncFromSqlApi()
+                .then(() => {
+                    console.log('Initial sync from SQL API completed');
+                    refreshVisibleReportViews();
+                })
+                .catch(error => {
+                    console.warn('Initial sync failed:', error.message);
+                    setupLocalStorageSync();
+                });
+            
+            if (cloudSyncState.pollIntervalId) {
+                clearInterval(cloudSyncState.pollIntervalId);
+            }
+            
+            // Continuous polling every 5 seconds (improved from 7 seconds)
+            cloudSyncState.pollIntervalId = setInterval(() => {
+                syncFromSqlApi()
+                    .then(() => {
+                        refreshVisibleReportViews();
+                    })
+                    .catch(error => {
+                        console.warn('Sync failed:', error.message);
+                    });
+            }, 5000);
+            
+            // Sync on focus
+            window.addEventListener('focus', () => {
+                syncFromSqlApi().then(() => {
+                    refreshVisibleReportViews();
+                });
             });
-        }
-    });
+            
+            // Sync on visibility
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    syncFromSqlApi().then(() => {
+                        refreshVisibleReportViews();
+                    });
+                }
+            });
+        })
+        .catch(error => {
+            console.warn('API health check failed:', error.message);
+            updateSyncStatusDisplay();
+            setupLocalStorageSync();
+        });
+}
 
-    window.addEventListener('storage', event => {
-        if (event.key === 'reports' || event.key === 'users') {
-            refreshVisibleReportViews();
-        }
-    });
+async function syncFromSqlApi() {
+    try {
+        // Fetch users and reports from SQL API in parallel
+        const [users, reports] = await Promise.all([
+            sqlApiGetUsers(),
+            sqlApiGetReports()
+        ]);
+        
+        // Update localStorage with API data
+        localStorage.setItem('users', JSON.stringify(users));
+        localStorage.setItem('reports', JSON.stringify(reports));
+        
+        return { users, reports };
+    } catch (error) {
+        console.warn('Failed to sync from SQL API:', error.message);
+        throw error;
+    }
 }
 
 function setupLocalStorageSync() {
@@ -1003,57 +1033,40 @@ async function handleSignup(e) {
         return;
     }
     
-    // Sync from cloud first to check for duplicates across all browsers/devices
-    if (isCloudSyncEnabled()) {
-        console.log('Syncing from cloud before signup to check for duplicate emails...');
-        await syncCloudData();
+    try {
+        // Create user on SQL API
+        const newUser = await sqlApiCreateUser({
+            fullName,
+            company,
+            jobRole,
+            email,
+            password: btoa(password) // Base64 encode like before
+        });
+        
+        // Also save locally for offline access
+        const users = getStorageData('users');
+        users.push(newUser);
+        localStorage.setItem('users', JSON.stringify(users));
+        
+        setCurrentUser(newUser);
+        
+        addNotification('New Account Created', `Welcome ${fullName}!`, 'success');
+        addAdminNotification('New User Registration', `New user ${fullName} (${email}) from ${company} has registered.`, 'info');
+        
+        showToast('Account created successfully!', 'success');
+        document.getElementById('signupForm').reset();
+        
+        setTimeout(() => {
+            initializeApp();
+            showSection('home');
+        }, 1000);
+    } catch (error) {
+        if (error.message.includes('already exists')) {
+            showToast('Email already registered', 'error');
+        } else {
+            showToast('Failed to create account: ' + error.message, 'error');
+        }
     }
-    
-    // Now check both local and potentially synced cloud data
-    const users = getStorageData('users');
-    if (users.some(u => u.email === email)) {
-        showToast('Email already registered', 'error');
-        return;
-    }
-    
-    // Create new user
-    const newUser = {
-        id: Date.now(),
-        fullName,
-        company,
-        jobRole,
-        email,
-        password: btoa(password), // Simple encoding (not secure, use hashing in production)
-        memberSince: new Date().toLocaleDateString(),
-        notifications: 'all'
-    };
-    
-    users.push(newUser);
-    saveStorageData('users', users);
-    
-    // Force immediate sync to cloud so admin can see new user
-    if (isCloudSyncEnabled()) {
-        console.log('New user registered: waiting for cloud sync to complete...');
-        await syncCloudData();
-        console.log('Cloud sync completed for new user');
-    }
-    
-    setCurrentUser(newUser);
-    
-    // Add notification for new user creation
-    addNotification('New Account Created', `Welcome ${fullName}! Your account has been successfully created.`, 'success');
-    
-    // Add notification to admin
-    addAdminNotification('New User Registration', `New user ${fullName} (${email}) from ${company} has registered.`, 'info');
-    
-    showToast('Account created successfully and synced to cloud!', 'success');
-    
-    // Reset form and switch to login
-    document.getElementById('signupForm').reset();
-    setTimeout(() => {
-        initializeApp();
-        showSection('home');
-    }, 1000);
 }
 
 function handleLogin(e) {
@@ -1067,31 +1080,31 @@ function handleLogin(e) {
         return;
     }
     
-    const users = getStorageData('users');
-    const user = users.find(u => u.email === email && u.password === btoa(password));
-    
-    if (!user) {
-        showToast('Invalid email or password', 'error');
-        return;
-    }
-    
-    setCurrentUser(user);
-    
-    if (user.isAdmin) {
-        showToast('Welcome Admin! You now have access to the admin dashboard.', 'success');
-    } else {
-        showToast('Login successful!', 'success');
-    }
-    
-    document.getElementById('loginForm').reset();
-    setTimeout(() => {
-        initializeApp();
-        if (user.isAdmin) {
-            showSection('admin');
-        } else {
-            showSection('home');
-        }
-    }, 1000);
+    // Async login with SQL API
+    sqlApiLoginUser(email, btoa(password))
+        .then(user => {
+            setCurrentUser(user);
+            
+            if (user.isAdmin) {
+                showToast('Welcome Admin!', 'success');
+            } else {
+                showToast('Login successful!', 'success');
+            }
+            
+            document.getElementById('loginForm').reset();
+            setTimeout(() => {
+                initializeApp();
+                if (user.isAdmin) {
+                    showSection('admin');
+                } else {
+                    showSection('home');
+                }
+            }, 1000);
+        })
+        .catch(error => {
+            showToast('Invalid email or password', 'error');
+            console.warn('Login failed:', error.message);
+        });
 }
 
 function logout() {
@@ -1139,7 +1152,6 @@ function handleReportSubmit(e) {
     }
     
     const newReport = {
-        id: Date.now(),
         userId: user.id,
         submittedBy: anonymous ? 'Anonymous' : user.fullName,
         company: user.company,
@@ -1148,55 +1160,50 @@ function handleReportSubmit(e) {
         location,
         severity,
         dateObserved,
-        timeObserved,
-        status: 'Pending',
-        submittedDate: new Date().toISOString(),
-        lastUpdated: new Date().toISOString(),
-        comments: []
+        timeObserved
     };
     
-    const reports = getStorageData('reports');
-    reports.push(newReport);
-    saveStorageData('reports', reports);
-    
-    // Add notification for new hazard report
-    addNotification('Hazard Report Submitted', `Your hazard report "${hazardTitle}" has been submitted successfully with ${severity} severity level.`, 'success');
-    
-    // Add notification to admin
-    const reporterName = anonymous ? 'Anonymous' : user.fullName;
-    addAdminNotification('New Hazard Report', `New ${severity} severity hazard report "${hazardTitle}" submitted by ${reporterName} from ${user.company}.`, 'warning');
-    
-    // Force immediate sync to cloud to ensure report is immediately visible to admin
-    if (isCloudSyncEnabled()) {
-        syncCloudData();
-    }
-    
-    showToast('Hazard report submitted successfully!', 'success');
-    document.getElementById('hazardForm').reset();
-    
-    setTimeout(() => {
-        showSection('dashboard');
-        loadUserReports();
-    }, 1000);
+    // Submit to SQL API
+    sqlApiCreateReport(newReport)
+        .then(savedReport => {
+            // Also save locally
+            const reports = getStorageData('reports');
+            reports.push(savedReport);
+            localStorage.setItem('reports', JSON.stringify(reports));
+            
+            addNotification('Hazard Report Submitted', `Your hazard report "${hazardTitle}" has been submitted successfully`, 'success');
+            addAdminNotification('New Hazard Report', `New ${severity} severity hazard report from ${user.fullName}`, 'warning');
+            
+            showToast('Hazard report submitted successfully!', 'success');
+            document.getElementById('hazardForm').reset();
+            
+            setTimeout(() => {
+                showSection('dashboard');
+                loadUserReports();
+            }, 1000);
+        })
+        .catch(error => {
+            showToast('Failed to submit report: ' + error.message, 'error');
+            console.error('Report submission failed:', error);
+        });
 }
 
 function deleteReport(reportId) {
     if (confirm('Are you sure you want to delete this report?')) {
-        const reports = getStorageData('reports');
-        const report = reports.find(r => r.id === reportId);
-        
-        if (!report) {
-            showToast('Report not found', 'error');
-            return;
-        }
-        
-        // Register the deletion
-        addToDeletedRecords('reports', reportId);
-        
-        const filteredReports = reports.filter(r => r.id !== reportId);
-        saveStorageData('reports', filteredReports);
-        showToast('Report deleted successfully', 'success');
-        loadUserReports();
+        sqlApiDeleteReport(reportId)
+            .then(() => {
+                // Remove from localStorage
+                const reports = getStorageData('reports');
+                const filteredReports = reports.filter(r => r.id !== reportId);
+                localStorage.setItem('reports', JSON.stringify(filteredReports));
+                
+                showToast('Report deleted successfully', 'success');
+                loadUserReports();
+            })
+            .catch(error => {
+                showToast('Failed to delete report: ' + error.message, 'error');
+                console.error('Delete failed:', error);
+            });
     }
 }
 
@@ -1239,16 +1246,6 @@ function editReport(reportId) {
 }
 
 function updateReport(reportId) {
-    const reports = getStorageData('reports');
-    const reportIndex = reports.findIndex(r => r.id === reportId);
-    
-    if (reportIndex === -1) {
-        showToast('Report not found', 'error');
-        return;
-    }
-    
-    const report = reports[reportIndex];
-    
     const hazardTitle = document.getElementById('hazardTitle').value.trim();
     const description = document.getElementById('hazardDescription').value.trim();
     const location = document.getElementById('location').value.trim();
@@ -1261,47 +1258,50 @@ function updateReport(reportId) {
         return;
     }
     
-    report.hazardTitle = hazardTitle;
-    report.description = description;
-    report.location = location;
-    report.severity = severity;
-    report.dateObserved = dateObserved;
-    report.timeObserved = timeObserved;
-    report.lastUpdated = new Date().toISOString();
+    const updates = {
+        hazardTitle,
+        description,
+        location,
+        severity,
+        dateObserved,
+        timeObserved
+    };
     
-    reports[reportIndex] = report;
-    saveStorageData('reports', reports);
-    
-    // Add notification for updated hazard report
-    addNotification('Hazard Report Updated', `Your hazard report "${hazardTitle}" has been updated successfully.`, 'success');
-    
-    // Force immediate sync to cloud
-    if (isCloudSyncEnabled()) {
-        syncCloudData();
-    }
-    
-    showToast('Report updated successfully!', 'success');
-    document.getElementById('hazardForm').reset();
-    
-    // Reset edit mode
-    currentEditingReportId = null;
-    
-    // Reset button text
-    const submitButton = document.querySelector('#hazardForm button[type="submit"]');
-    if (submitButton) {
-        submitButton.textContent = 'Submit Hazard Report';
-    }
-    
-    // Reset header text
-    const headerP = document.querySelector('#report .section-header p');
-    if (headerP) {
-        headerP.textContent = 'Help us maintain a safe mining environment by reporting hazards immediately';
-    }
-    
-    setTimeout(() => {
-        showSection('dashboard');
-        loadUserReports();
-    }, 1000);
+    sqlApiUpdateReport(reportId, updates)
+        .then(updatedReport => {
+            // Update localStorage
+            const reports = getStorageData('reports');
+            const index = reports.findIndex(r => r.id === reportId);
+            if (index >= 0) {
+                reports[index] = updatedReport;
+                localStorage.setItem('reports', JSON.stringify(reports));
+            }
+            
+            addNotification('Hazard Report Updated', `Your report "${hazardTitle}" has been updated`, 'success');
+            
+            showToast('Report updated successfully!', 'success');
+            document.getElementById('hazardForm').reset();
+            currentEditingReportId = null;
+            
+            const submitButton = document.querySelector('#hazardForm button[type="submit"]');
+            if (submitButton) {
+                submitButton.textContent = 'Submit Hazard Report';
+            }
+            
+            const headerP = document.querySelector('#report .section-header p');
+            if (headerP) {
+                headerP.textContent = 'Help us maintain a safe mining environment by reporting hazards immediately';
+            }
+            
+            setTimeout(() => {
+                showSection('dashboard');
+                loadUserReports();
+            }, 1000);
+        })
+        .catch(error => {
+            showToast('Failed to update report: ' + error.message, 'error');
+            console.error('Update failed:', error);
+        });
 }
 
 // ============================
@@ -1312,11 +1312,47 @@ function loadUserReports() {
     const user = getCurrentUser();
     if (!user) return;
     
-    const reports = getStorageData('reports');
-    const userReports = reports.filter(r => r.userId === user.id);
-    
-    displayReports(userReports, 'reportsList');
-    updateStats(userReports);
+    // Admins see all reports, regular users see only their own
+    if (isAdmin()) {
+        // Load all reports for admin view
+        sqlApiGetReports()
+            .then(allReports => {
+                // Cache locally
+                localStorage.setItem('reports', JSON.stringify(allReports));
+                displayReports(allReports, 'reportsList');
+                updateStats(allReports);
+            })
+            .catch(error => {
+                console.warn('Failed to fetch all reports from API, using localStorage');
+                // Fallback to localStorage
+                const reports = getStorageData('reports');
+                displayReports(reports, 'reportsList');
+                updateStats(reports);
+            });
+    } else {
+        // Regular users see only their own reports
+        sqlApiGetReports({ userId: user.id })
+            .then(userReports => {
+                // Cache locally
+                if (userReports.length > 0 || userReports.length === 0) {
+                    const allReports = getStorageData('reports');
+                    const updatedReports = allReports.filter(r => r.userId !== user.id);
+                    updatedReports.push(...userReports);
+                    localStorage.setItem('reports', JSON.stringify(updatedReports));
+                }
+                
+                displayReports(userReports, 'reportsList');
+                updateStats(userReports);
+            })
+            .catch(error => {
+                console.warn('Failed to fetch reports from API, using localStorage');
+                // Fallback to localStorage
+                const reports = getStorageData('reports');
+                const userReports = reports.filter(r => r.userId === user.id);
+                displayReports(userReports, 'reportsList');
+                updateStats(userReports);
+            });
+    }
 }
 
 function displayReports(reports, containerId) {
