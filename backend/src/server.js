@@ -18,10 +18,11 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 // CORS configuration
 const corsOptions = {
-    origin: (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',').map(s => s.trim()),
+    origin: ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001', 'file://'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', '*'],
+    optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
 
